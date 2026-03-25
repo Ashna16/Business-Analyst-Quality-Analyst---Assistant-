@@ -1,0 +1,24 @@
+{
+  "name": "ba-qa-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "run": "tsx src/index.ts",
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "composio-core": "^0.5.39",
+    "docx": "^9.6.1",
+    "dotenv": "^16.4.7",
+    "redis": "^4.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=22.16.0"
+  }
+}
