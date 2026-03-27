@@ -171,15 +171,25 @@ wrong behavior, or regression described.`,
   }));
 }
 
-export async function parseTranscript(transcript: string): Promise<WorkItem[]> {
+export type TranscriptParserId = "contextual-ai" | "openai" | "heuristic";
+
+export type ParseTranscriptResult = {
+  items: WorkItem[];
+  parser: TranscriptParserId;
+};
+
+export async function parseTranscript(transcript: string): Promise<ParseTranscriptResult> {
   if (config.contextualAiApiKey) {
     try {
       const items = await extractWorkItemsWithContextualAi(transcript);
       if (items.length) {
-        return items.map((it) => ({
-          ...it,
-          kind: refineWorkItemKind(it.kind, `${it.title}\n${it.summary}`),
-        }));
+        return {
+          items: items.map((it) => ({
+            ...it,
+            kind: refineWorkItemKind(it.kind, `${it.title}\n${it.summary}`),
+          })),
+          parser: "contextual-ai",
+        };
       }
       console.warn("[parser] Contextual AI returned no items; falling back.");
     } catch (e) {
@@ -189,10 +199,15 @@ export async function parseTranscript(transcript: string): Promise<WorkItem[]> {
   if (config.openaiApiKey) {
     try {
       const items = await openAiParse(transcript);
-      return items.length ? items : heuristicParse(transcript);
+      if (items.length) {
+        return { items, parser: "openai" };
+      }
+      console.warn("[parser] OpenAI returned no items; using heuristic.");
+      return { items: heuristicParse(transcript), parser: "heuristic" };
     } catch (e) {
       console.warn("[parser] OpenAI failed, falling back to heuristic:", e);
+      return { items: heuristicParse(transcript), parser: "heuristic" };
     }
   }
-  return heuristicParse(transcript);
+  return { items: heuristicParse(transcript), parser: "heuristic" };
 }

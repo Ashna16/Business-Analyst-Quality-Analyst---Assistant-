@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   AlignmentType,
@@ -19,29 +19,47 @@ import { config } from "./config.js";
 import type { JiraPayload } from "./jira.js";
 import type { RedactedWorkItem } from "./types.js";
 
-/** Fixed deliverable path (Desktop BA_QA_DEMO_OUTPUT), portable via homedir(). */
-export const QA_REPORT_DOCX_PATH = join(
-  homedir(),
-  "Desktop",
-  "BA_QA_DEMO_OUTPUT",
-  "QA_Report.docx",
-);
+/**
+ * Directory for Word QA reports (Desktop BA_QA_DEMO_OUTPUT). Each bug writes its own file:
+ * QA_Report_<bugId>_<YYYYMMDD_HHmmss>.docx — nothing is overwritten.
+ */
+export const QA_REPORT_DOCX_PATH = join(homedir(), "Desktop", "BA_QA_DEMO_OUTPUT");
 
-export function makeTestCaseId(): string {
+function qaReportTimestamp(): string {
   const d = new Date();
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
-  const rnd = Math.random().toString(36).slice(2, 6).toUpperCase();
-  return `TC-${y}${m}${day}-${rnd}`;
+  const h = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  const s = String(d.getSeconds()).padStart(2, "0");
+  return `${y}${m}${day}_${h}${min}${s}`;
 }
 
-/** Payload for Word QA report + markdown; aligns with pipeline bug rows */
+/** Shared date segment for IDs: `TC-YYYYMMDD`. */
+function testCaseIdDatePrefix(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `TC-${y}${m}${day}`;
+}
+
+/** Per-step ID for Word table rows: `TC-YYYYMMDD-STY0`, `TC-YYYYMMDD-STY1`, … */
+export function makeStepTestCaseId(stepIndex: number): string {
+  return `${testCaseIdDatePrefix()}-STY${stepIndex}`;
+}
+
+/** Primary ID for markdown (first step index); same family as `makeStepTestCaseId`. */
+export function makeTestCaseId(): string {
+  return makeStepTestCaseId(0);
+}
+
+/** Payload for Word QA report; use `fileSlug` for stable per-bug filenames */
 export type QaBugReportData = {
-  testCaseId: string;
   item: RedactedWorkItem;
   jira: JiraPayload;
-  /** @deprecated path is fixed to QA_Report.docx; kept for call-site compatibility */
+  /** Sanitized bug id for `QA_Report_<fileSlug>_<timestamp>.docx` */
   fileSlug?: string;
 };
 
@@ -67,63 +85,45 @@ function formatReportDate(): string {
   }).format(new Date());
 }
 
-/**
- * At least 3 table rows: prefer stepsToReproduce; pad from transcript summary + bug description.
- */
-function buildAtLeastThreeActionSteps(item: RedactedWorkItem, jira: JiraPayload): string[] {
-  const fromTicket = jira.stepsToReproduce.map((s) => s.trim()).filter(Boolean);
-  if (fromTicket.length >= 3) {
-    return fromTicket;
-  }
-
-  const narrative = [item.summary.trim(), jira.description.trim()].filter(Boolean).join("\n");
-  const chunks = narrative
-    .split(/\n+|(?<=[.!?])\s+/)
-    .map((s) => s.replace(/\s+/g, " ").trim())
-    .filter((s) => s.length > 12);
-
-  const derived: string[] = [];
-  for (const c of chunks) {
-    if (fromTicket.length + derived.length >= 3) {
-      break;
-    }
-    if (
-      fromTicket.some((t) => t.includes(c.slice(0, 40))) ||
-      derived.some((d) => d.includes(c.slice(0, 40)))
-    ) {
-      continue;
-    }
-    derived.push(c.length > 220 ? `${c.slice(0, 217)}…` : c);
-  }
-
-  const fallbacks = [
-    `Open CCMS 2.0 and navigate to the area related to: ${item.title}`,
-    `Reproduce the reported behavior using the defect narrative and capture evidence (screens / logs).`,
-    `Verify resolution against expected behavior: ${jira.expectedResult || "documented acceptance criteria"}.`,
-  ];
-
-  let out = [...fromTicket];
-  for (const d of [...derived, ...fallbacks]) {
-    if (out.length >= 3) {
-      break;
-    }
-    if (!out.includes(d)) {
-      out.push(d);
-    }
-  }
-
-  return out.slice(0, Math.max(3, out.length));
+function normalizeStepDedupeKey(step: string): string {
+  return step.replace(/\s+/gu, " ").trim().toLowerCase();
 }
 
 /**
- * Builds QA_Report.docx on Desktop BA_QA_DEMO_OUTPUT (see QA_REPORT_DOCX_PATH).
+ * Actual test steps only: non-empty, trimmed, duplicates removed (case-insensitive / whitespace-normalized).
+ */
+function distinctTestStepsFromJira(jira: JiraPayload): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of jira.stepsToReproduce) {
+    const t = raw.replace(/\s+/gu, " ").trim();
+    if (!t) {
+      continue;
+    }
+    const key = normalizeStepDedupeKey(t);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    out.push(t);
+  }
+  return out;
+}
+
+/**
+ * Builds QA_Report_<bugId>_<timestamp>.docx under QA_REPORT_DOCX_PATH (one file per bug, no overwrites).
  */
 export async function generateWordQAReport(bugData: QaBugReportData): Promise<string> {
-  const { testCaseId, jira, item } = bugData;
-  const outPath = QA_REPORT_DOCX_PATH;
-  mkdirSync(dirname(outPath), { recursive: true });
+  const { jira, item } = bugData;
+  const bugId =
+    (bugData.fileSlug ?? "bug")
+      .replace(/[^a-zA-Z0-9-_]+/gu, "_")
+      .replace(/^_+/u, "")
+      .replace(/_+$/u, "") || "bug";
+  const outPath = join(QA_REPORT_DOCX_PATH, `QA_Report_${bugId}_${qaReportTimestamp()}.docx`);
+  mkdirSync(QA_REPORT_DOCX_PATH, { recursive: true });
 
-  const steps = buildAtLeastThreeActionSteps(item, jira);
+  const steps = distinctTestStepsFromJira(jira);
 
   const tableRows: TableRow[] = [
     new TableRow({
@@ -156,7 +156,7 @@ export async function generateWordQAReport(bugData: QaBugReportData): Promise<st
           children: [
             new TableCell({
               width: { size: 18, type: WidthType.PERCENTAGE },
-              children: [cellParagraph(i === 0 ? testCaseId : "↳")],
+              children: [cellParagraph(makeStepTestCaseId(i))],
             }),
             new TableCell({
               width: { size: 28, type: WidthType.PERCENTAGE },

@@ -14,7 +14,7 @@ import {
 import {
   buildJiraQuickImportSection,
   buildJiraSendToJiraTopSection,
-  createJiraTicketAutomated,
+  createJiraTicketDirect,
   toJiraPayload,
 } from "./jira.js";
 import { findSimilarBugs, recordBugFingerprint } from "./memory.js";
@@ -102,7 +102,17 @@ export async function runPipeline(transcriptPath: string): Promise<PipelineResul
     );
   }
 
-  const parsed = await parseTranscript(transcript);
+  const { items: parsed, parser } = await parseTranscript(transcript);
+  const parserLabel =
+    parser === "contextual-ai" ? "Contextual AI" : parser === "openai" ? "OpenAI" : "heuristic";
+  console.log(`[baqa] parseTranscript: parser=${parserLabel}  items=${parsed.length}`);
+  for (let i = 0; i < parsed.length; i++) {
+    const it = parsed[i];
+    const summaryOneLine = it.summary.replace(/\s+/g, " ").trim();
+    console.log(`[baqa]   ${i + 1}. [${it.kind}] ${it.title}`);
+    console.log(`[baqa]      summary: ${summaryOneLine}`);
+  }
+
   const redacted: RedactedWorkItem[] = [];
   for (const item of parsed) {
     redacted.push(await redactForEnterprise(item));
@@ -136,24 +146,23 @@ export async function runPipeline(transcriptPath: string): Promise<PipelineResul
     const tcId = makeTestCaseId();
 
     const wordPath = await generateWordQAReport({
-      testCaseId: tcId,
       item,
       jira: jiraPayload,
       fileSlug: safe,
     });
     writtenFiles.push(wordPath);
 
-    const jiraAutomated = await createJiraTicketAutomated({ item, jira: jiraPayload });
-    jiraResults.set(item.title, { ok: jiraAutomated.ok, detail: jiraAutomated.detail });
-    console.log(`[jira] ${item.title.slice(0, 50)}… => ${jiraAutomated.detail}`);
+    const jiraDirect = await createJiraTicketDirect({ item, jira: jiraPayload });
+    jiraResults.set(item.title, { ok: jiraDirect.ok, detail: jiraDirect.detail });
+    console.log(`[jira] ${item.title.slice(0, 50)}… => ${jiraDirect.detail}`);
 
-    if (jiraAutomated.ok) {
+    if (jiraDirect.ok) {
       console.log("🚀 Jira Ticket Created & Word Doc Generated!");
     }
 
     const stubPath = await writeJiraMarkdownStub(item, jiraPayload, {
       wordAbsPath: wordPath,
-      issueUrl: jiraAutomated.issueUrl,
+      issueUrl: jiraDirect.issueUrl,
     });
     writtenFiles.push(stubPath);
 

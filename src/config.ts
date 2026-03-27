@@ -67,8 +67,12 @@ export const config = {
   /** Issue type name or id for Composio (e.g. Bug) */
   jiraIssueTypeName: env("JIRA_ISSUE_TYPE_NAME", "Bug"),
 
-  /** Atlassian site subdomain only (e.g. acme for acme.atlassian.net). */
-  jiraAtlassianDomain: env("JIRA_ATLASSIAN_DOMAIN", "ashnaparekh1998"),
+  /** Atlassian Cloud host: subdomain only or full host (e.g. acme or acme.atlassian.net). */
+  jiraAtlassianDomain: env("JIRA_ATLASSIAN_DOMAIN", "your-domain.atlassian.net"),
+
+  /** Jira REST: API token + email for Basic auth (https://developer.atlassian.com/cloud/jira/platform/rest/v3/) */
+  jiraApiToken: env("JIRA_API_TOKEN"),
+  jiraUserEmail: env("JIRA_USER_EMAIL"),
   /** Numeric Jira project id for Create Issue URL pid= (verify for your SCRUM board). */
   jiraProjectId: env("JIRA_PROJECT_ID", "10000"),
   jiraIssueTypeId: env("JIRA_ISSUE_TYPE_ID", "1"),
