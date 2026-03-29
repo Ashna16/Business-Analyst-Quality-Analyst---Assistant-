@@ -63,6 +63,8 @@ Copy `.env.example` to `.env` and fill in values. Do not commit `.env`.
 | `BAQA_ECHO_ARTIFACTS`                | `1`/`0` — print generated markdown to the console.                      |
 | `BAQA_MOCK`                          | `1` forces mock-friendly mode; unset infers from missing keys.          |
 
+<img width="752" height="257" alt="Screenshot 2026-03-27 at 6 43 33 PM" src="https://github.com/user-attachments/assets/987afab7-a2ad-44d4-a63b-c30b76be9737" />
+
 ## How to run
 
 From this folder (`ba-qa-assistant/`):
